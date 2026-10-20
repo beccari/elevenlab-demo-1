@@ -4,6 +4,10 @@ A professional text-to-speech web app built around the [ElevenLabs getting-start
 
 ![stack](https://img.shields.io/badge/stack-React_19_·_Vite_·_Tailwind_4_·_Express_5-black) ![sdk](https://img.shields.io/badge/SDK-@elevenlabs/elevenlabs_js-orange)
 
+## Preview
+
+![Voice Studio — studio UI with script editor, model cards, voice picker, and waveform generator](docs/screenshot.png)
+
 ## Features
 
 - **Studio UI** — dark glass design, animated hero, model as segmented cards, ⌘⏎ shortcut
