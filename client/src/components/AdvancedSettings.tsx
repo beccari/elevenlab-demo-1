@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChevronIcon, ResetIcon } from "./icons";
+import { FALLBACK_SPEED_SPEC } from "../types";
 import type { Meta, SettingsState } from "../types";
 
 interface AdvancedSettingsProps {
@@ -86,6 +87,8 @@ export function AdvancedSettings({
 }: AdvancedSettingsProps) {
   const [open, setOpen] = useState(false);
   const vs = meta?.voiceSettings;
+  // The server owns the speed range; the fallback only covers an older API.
+  const speed = vs?.speed ?? FALLBACK_SPEED_SPEC;
 
   const patch = (key: keyof SettingsState, value: number | boolean) =>
     onChange({ ...settings, [key]: value });
@@ -97,7 +100,7 @@ export function AdvancedSettings({
       similarityBoost: vs.similarityBoost.default,
       style: vs.style.default,
       useSpeakerBoost: vs.useSpeakerBoost.default,
-      speed: 1,
+      speed: speed.default,
     });
   };
 
@@ -115,7 +118,7 @@ export function AdvancedSettings({
               Delivery settings
             </h2>
             <span className="rounded-md bg-white/6 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
-              optional · overrides the voice's stored settings
+              applied to every generation · overrides the voice's stored settings
             </span>
           </div>
           <ChevronIcon
@@ -176,9 +179,9 @@ export function AdvancedSettings({
                     label="Speed"
                     hint="1.00 = natural pace"
                     value={settings.speed}
-                    min={0.7}
-                    max={1.2}
-                    step={0.05}
+                    min={speed.min}
+                    max={speed.max}
+                    step={speed.step}
                     format={(v) => `${v.toFixed(2)}×`}
                     onChange={(v) => patch("speed", v)}
                   />
@@ -201,8 +204,9 @@ export function AdvancedSettings({
             )}
           </div>
           <div className="border-t border-white/6 px-5 py-2.5 text-[11px] text-zinc-600">
-            Applied per request via <code className="font-mono text-zinc-500">voice_settings</code> —
-            the voice's stored settings are never modified.
+            Sent with every request via{" "}
+            <code className="font-mono text-zinc-500">voice_settings</code> — these values always
+            override the voice's stored settings, which are never modified.
           </div>
         </div>
       </div>

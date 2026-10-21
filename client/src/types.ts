@@ -13,11 +13,18 @@ export interface SliderSpec {
   default: number;
 }
 
+/**
+ * Used only when a server predates the `speed` entry in VOICE_SETTINGS, so an
+ * older API can't break the settings panel. The server's spec always wins.
+ */
+export const FALLBACK_SPEED_SPEC: SliderSpec = { min: 0.7, max: 1.2, step: 0.05, default: 1 };
+
 export interface VoiceSettingsSpec {
   stability: SliderSpec;
   similarityBoost: SliderSpec;
   style: SliderSpec;
   useSpeakerBoost: { default: boolean };
+  speed: SliderSpec;
 }
 
 export interface Meta {

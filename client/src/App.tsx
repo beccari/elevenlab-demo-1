@@ -9,18 +9,38 @@ import { Toast } from "./components/Toast";
 import type { ToastData } from "./components/Toast";
 import { BarsIcon } from "./components/icons";
 import { api } from "./api";
-import { ApiError } from "./types";
+import { ApiError, FALLBACK_SPEED_SPEC } from "./types";
 import type {
   Meta,
   Quota,
   SettingsState,
   TtsRequest,
   Voice,
+  VoiceSettingsSpec,
 } from "./types";
 
 const FALLBACK_DEFAULT_VOICE = "JBFqnCBsd6RMkjVDRZzb"; // the getting-started snippet's voice
 const FALLBACK_MODEL = "eleven_multilingual_v2";
 const FALLBACK_FORMAT = "mp3_44100_128";
+
+/** Pre-meta placeholder; replaced by the server's declared defaults on load. */
+const PLACEHOLDER_SETTINGS: SettingsState = {
+  stability: 0.5,
+  similarityBoost: 0.75,
+  style: 0,
+  useSpeakerBoost: true,
+  speed: 1,
+};
+
+export function settingsFromMeta(vs: VoiceSettingsSpec): SettingsState {
+  return {
+    stability: vs.stability.default,
+    similarityBoost: vs.similarityBoost.default,
+    style: vs.style.default,
+    useSpeakerBoost: vs.useSpeakerBoost.default,
+    speed: (vs.speed ?? FALLBACK_SPEED_SPEC).default,
+  };
+}
 
 /** Persistent "out of credits" notice: quota numbers, reset date, and actions. */
 function QuotaBanner({
@@ -92,16 +112,11 @@ export default function App() {
   const [voiceId, setVoiceId] = useState("");
   const [modelId, setModelId] = useState(FALLBACK_MODEL);
   const [outputFormat, setOutputFormat] = useState(FALLBACK_FORMAT);
-  const [settings, setSettings] = useState<SettingsState>({
-    stability: 0.5,
-    similarityBoost: 0.75,
-    style: 0,
-    useSpeakerBoost: true,
-    speed: 1,
-  });
+  const [settings, setSettings] = useState<SettingsState>(PLACEHOLDER_SETTINGS);
 
   // ---- generation ----
   const [busy, setBusy] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [takeBytes, setTakeBytes] = useState(0);
   const [lastTake, setLastTake] = useState<{ voiceName: string; modelName: string } | null>(null);
@@ -109,6 +124,9 @@ export default function App() {
   // Quota failures get a persistent banner (with actions) instead of the short toast.
   const [quotaError, setQuotaError] = useState<string | null>(null);
   const playerRef = useRef<HTMLDivElement>(null);
+  // Guards the one-time model default so a later meta refresh can't stomp a
+  // model the user picked by hand.
+  const metaApplied = useRef(false);
 
   const maxChars = meta?.maxTextChars ?? 5000;
 
@@ -119,8 +137,16 @@ export default function App() {
       .meta()
       .then((meta) => {
         setMeta(meta);
-        setModelId(Object.keys(meta.models)[0] ?? FALLBACK_MODEL);
         setText((current) => current || meta.defaultText);
+        if (!metaApplied.current) {
+          metaApplied.current = true;
+          // The server's VOICE_SETTINGS are the single source of truth for the
+          // slider defaults, so seed the panel from them instead of duplicating.
+          setSettings(settingsFromMeta(meta.voiceSettings));
+          // Only the first load may pick the model; a later refresh must not
+          // stomp a model the user chose by hand.
+          setModelId(Object.keys(meta.models)[0] ?? FALLBACK_MODEL);
+        }
       })
       .catch((err) => setFatal(err.message));
   }, []);
@@ -145,7 +171,12 @@ export default function App() {
         // e.g. key without user_read permission — degrade to a quiet "n/a" pill.
         setQuotaWarning(quota ? null : (error ?? "Quota unavailable."));
       })
-      .catch(() => setQuota(null));
+      .catch((err) => {
+        setQuota(null);
+        // e.g. 401 from a key without the user_read permission — without this
+        // the top bar would sit on its loading skeleton forever.
+        setQuotaWarning(err instanceof Error ? err.message : "Quota unavailable.");
+      });
   }, []);
 
   useEffect(() => refreshQuota(), [refreshQuota]);
@@ -158,11 +189,11 @@ export default function App() {
   }, [voices, meta, voiceId]);
 
   // ---- generation ----
-  const generate = async () => {
+  const generate = useCallback(async () => {
     if (busy) return;
-    if (!text.trim()) return setToast({ message: "Type some text first.", kind: "error" });
-    if (!voiceId) return setToast({ message: "Pick a voice first.", kind: "error" });
-    if (!meta) return setToast({ message: fatal ?? "Server is not ready yet.", kind: "error" });
+    if (!text.trim()) return setToast({ message: "Type some text first." });
+    if (!voiceId) return setToast({ message: "Pick a voice first." });
+    if (!meta) return setToast({ message: fatal ?? "Server is not ready yet." });
 
     setBusy(true);
     try {
@@ -185,10 +216,7 @@ export default function App() {
       const voiceName = voices?.find((v) => v.id === voiceId)?.name ?? voiceId;
       const modelName = meta.models[modelId]?.name ?? modelId;
 
-      setAudioUrl((previous) => {
-        if (previous) URL.revokeObjectURL(previous);
-        return URL.createObjectURL(blob);
-      });
+      setAudioBlob(blob);
       setTakeBytes(blob.size);
       setLastTake({ voiceName, modelName });
       setToast(null);
@@ -208,13 +236,12 @@ export default function App() {
       } else {
         setToast({
           message: err instanceof Error ? err.message : "Generation failed.",
-          kind: "error",
         });
       }
     } finally {
       setBusy(false);
     }
-  };
+  }, [busy, text, voiceId, meta, modelId, outputFormat, settings, voices, fatal, refreshQuota]);
 
   // ⌘/Ctrl + Enter generates from anywhere on the page.
   useEffect(() => {
@@ -226,10 +253,23 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, [generate]);
 
-  const selectedVoiceName =
-    voices?.find((v) => v.id === voiceId)?.name ?? FALLBACK_DEFAULT_VOICE;
+  // The object URL is owned by this effect: it is created when a new take
+  // arrives and revoked when that take is replaced or the player goes away.
+  useEffect(() => {
+    if (!audioBlob) {
+      setAudioUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(audioBlob);
+    setAudioUrl(url);
+    return () => {
+      URL.revokeObjectURL(url);
+    };
+  }, [audioBlob]);
+
+  const selectedVoiceName = voices?.find((v) => v.id === voiceId)?.name ?? (voiceId || "—");
   const speedSupported = meta?.models[modelId]?.supportsSpeed ?? false;
   const voicesAvailable = voices !== null && voices.length > 0;
 
@@ -280,7 +320,6 @@ export default function App() {
             outputFormat={outputFormat}
             onOutputFormat={setOutputFormat}
             maxChars={maxChars}
-            disabled={false}
           />
 
           <VoicePicker voices={voices} voiceId={voiceId} onVoiceId={setVoiceId} />
@@ -311,10 +350,11 @@ export default function App() {
                 }
                 bytes={takeBytes}
                 onClose={() => {
-                  setAudioUrl((previous) => {
-                    if (previous) URL.revokeObjectURL(previous);
-                    return null;
-                  });
+                  // The effect owns the URL: dropping the blob makes it revoke
+                  // the object URL. Clearing the URL too unmounts the player in
+                  // the same commit, so the <audio> never points at a dead URL.
+                  setAudioBlob(null);
+                  setAudioUrl(null);
                   setLastTake(null);
                 }}
               />

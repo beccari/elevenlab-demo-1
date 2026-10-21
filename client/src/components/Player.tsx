@@ -13,9 +13,16 @@ interface PlayerProps {
  * can only ever have a single MediaElementAudioSourceNode). Keeping records in
  * a WeakMap also survives React StrictMode's double effect invocation.
  */
-const sources = new WeakMap<HTMLMediaElement, { ctx: AudioContext; analyser: AnalyserNode }>();
+interface SourceRecord {
+  ctx: AudioContext;
+  analyser: AnalyserNode;
+  /** Pending deferred close, cancelled if the element is re-attached. */
+  closeTimer: number | null;
+}
 
-function attach(audio: HTMLAudioElement) {
+const sources = new WeakMap<HTMLMediaElement, SourceRecord>();
+
+function attach(audio: HTMLAudioElement): SourceRecord {
   let record = sources.get(audio);
   if (!record) {
     const ctx = new AudioContext();
@@ -25,10 +32,28 @@ function attach(audio: HTMLAudioElement) {
     analyser.smoothingTimeConstant = 0.82;
     node.connect(analyser);
     analyser.connect(ctx.destination);
-    record = { ctx, analyser };
+    record = { ctx, analyser, closeTimer: null };
     sources.set(audio, record);
+  } else if (record.closeTimer !== null) {
+    // StrictMode re-mounts the effect right after the cleanup: keep the context.
+    window.clearTimeout(record.closeTimer);
+    record.closeTimer = null;
   }
   return record;
+}
+
+/**
+ * Chrome only allows a handful of concurrent AudioContexts, so they have to be
+ * closed when the Player goes away. The close is deferred by a tick because
+ * StrictMode tears the effect down and sets it up again immediately — closing
+ * synchronously would leave the second mount with a dead context.
+ */
+function release(record: SourceRecord) {
+  if (record.closeTimer !== null) window.clearTimeout(record.closeTimer);
+  record.closeTimer = window.setTimeout(() => {
+    record.closeTimer = null;
+    void record.ctx.close().catch(() => {});
+  }, 0);
 }
 
 function Visualizer({ audioRef }: { audioRef: React.RefObject<HTMLAudioElement | null> }) {
@@ -39,7 +64,8 @@ function Visualizer({ audioRef }: { audioRef: React.RefObject<HTMLAudioElement |
     const audio = audioRef.current;
     if (!canvas || !audio) return;
 
-    const { ctx, analyser } = attach(audio);
+    const record = attach(audio);
+    const { ctx, analyser } = record;
     void ctx.resume().catch(() => {});
 
     const dpr = window.devicePixelRatio || 1;
@@ -101,6 +127,8 @@ function Visualizer({ audioRef }: { audioRef: React.RefObject<HTMLAudioElement |
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      // Chrome caps the number of live AudioContexts, so release ours on unmount.
+      release(record);
     };
   }, [audioRef]);
 

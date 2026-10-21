@@ -3,7 +3,6 @@ import { CloseIcon } from "./icons";
 
 export interface ToastData {
   message: string;
-  kind: "error" | "info";
 }
 
 export function Toast({ data, onDismiss }: { data: ToastData; onDismiss: () => void }) {
@@ -14,27 +13,18 @@ export function Toast({ data, onDismiss }: { data: ToastData; onDismiss: () => v
 
   return (
     <div
-      role={data.kind === "error" ? "alert" : "status"}
+      role="alert"
       className="toast-enter fixed bottom-6 left-1/2 z-50 max-w-lg -translate-x-1/2 rounded-xl border px-4 py-3 shadow-2xl backdrop-blur-xl"
       style={{
-        background:
-          data.kind === "error"
-            ? "rgb(60 12 20 / 0.92)"
-            : "rgb(20 22 29 / 0.92)",
-        borderColor: data.kind === "error" ? "rgb(255 106 148 / 0.35)" : "rgb(255 255 255 / 0.09)",
+        background: "rgb(60 12 20 / 0.92)",
+        borderColor: "rgb(255 106 148 / 0.35)",
       }}
     >
       <div className="flex items-start gap-3">
-        <span
-          className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full font-bold text-xs ${
-            data.kind === "error" ? "bg-red-500/25 text-red-200" : "bg-accent-500/25 text-accent-400"
-          }`}
-        >
-          {data.kind === "error" ? "!" : "i"}
+        <span className="mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full bg-red-500/25 font-bold text-xs text-red-200">
+          !
         </span>
-        <p className={`text-sm leading-snug ${data.kind === "error" ? "text-red-100" : "text-zinc-200"}`}>
-          {data.message}
-        </p>
+        <p className="text-sm leading-snug text-red-100">{data.message}</p>
         <button
           type="button"
           onClick={onDismiss}

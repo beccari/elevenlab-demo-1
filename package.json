@@ -9,22 +9,23 @@
     "dev:api": "node --watch --env-file-if-exists=.env server.js",
     "dev:web": "vite",
     "build": "vite build",
-    "start": "node --env-file-if-exists=.env server.js"
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "tsc -p tsconfig.test.json && node scripts/prepare-test-build.cjs && node --test \"build/**/*.test.js\""
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.74.0",
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
     "@tailwindcss/vite": "^4.1.13",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.0.3",
     "concurrently": "^9.2.1",
-    "express": "^5.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.1.13",
     "typescript": "^5.9.2",
     "vite": "^7.1.9"
-  },
-  "devDependencies": {
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0"
   }
 }
