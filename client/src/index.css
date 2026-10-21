@@ -164,21 +164,6 @@ input[type="range"].slider::-moz-range-thumb {
   scrollbar-color: rgb(255 255 255 / 0.2) transparent;
 }
 
-/* Equalizer bars in the loading button */
-.eq-bars > span {
-  animation: eq 0.9s ease-in-out infinite;
-  transform-origin: bottom;
-}
-@keyframes eq {
-  0%,
-  100% {
-    transform: scaleY(0.3);
-  }
-  50% {
-    transform: scaleY(1);
-  }
-}
-
 /* Spinner */
 .spinner {
   border-radius: 999px;

@@ -29,7 +29,7 @@ USER node
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -qO- "http://127.0.0.1:${PORT}/api/meta" > /dev/null || exit 1
+  CMD wget -qO- "http://127.0.0.1:${PORT}/api/health" > /dev/null || exit 1
 
 # API key is injected at runtime: docker run -e ELEVENLABS_API_KEY=... (never baked in).
 CMD ["node", "server.js"]

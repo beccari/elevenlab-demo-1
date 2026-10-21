@@ -12,7 +12,7 @@ A professional text-to-speech web app built around the [ElevenLabs getting-start
 
 - **Studio UI** — dark glass design, animated hero, model as segmented cards, ⌘⏎ shortcut
 - **Voice auditioning** — searchable list of your account voices with inline play of each voice's official sample (`previewUrl`)
-- **Delivery settings** — stability / similarity / style sliders, speaker-boost toggle, and speed (auto-hidden + dropped server-side for models that don't support it), sent as `voice_settings`
+- **Delivery settings** — stability / similarity / style sliders, speaker-boost toggle, and speed (auto-hidden + dropped server-side for models that don't support it), sent with every request as `voice_settings`, so they always override the voice's stored settings
 - **Live waveform** — Web Audio `AnalyserNode` visualizer on the player, bars react to your own generated take
 - **Character quota** — tier + usage pill pulled from the account subscription; refreshes after every generation (quietly degrades to "quota n/a" if the key lacks `user_read`)
 - **Robust API** — validation of text/model/format/settings, friendly error mapping (quota / auth / permission / rate-limit / upstream), graceful no-key boot, request logging, graceful shutdown
@@ -46,6 +46,7 @@ Open http://localhost:3000
 | Route | Purpose |
 |---|---|
 | `GET /api/meta` | models, output formats, settings ranges, snippet defaults |
+| `GET /api/health` | liveness probe — 200 when `ELEVENLABS_API_KEY` is set, 503 otherwise |
 | `GET /api/voices` | account voices incl. `previewUrl` (audition samples) |
 | `GET /api/quota` | tier + character usage from the subscription |
 | `POST /api/tts` | text → MP3; accepts `voiceId`, `modelId`, `outputFormat`, `voiceSettings` |

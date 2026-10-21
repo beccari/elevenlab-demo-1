@@ -9,7 +9,6 @@ interface EditorProps {
   outputFormat: string;
   onOutputFormat: (format: string) => void;
   maxChars: number;
-  disabled: boolean;
 }
 
 export function Editor({
@@ -21,7 +20,6 @@ export function Editor({
   outputFormat,
   onOutputFormat,
   maxChars,
-  disabled,
 }: EditorProps) {
   const chars = text.length;
 
@@ -43,7 +41,7 @@ export function Editor({
         onChange={(e) => onText(e.target.value)}
         maxLength={maxChars}
         rows={5}
-        disabled={disabled || !meta}
+        disabled={!meta}
         placeholder={meta?.defaultText}
         className="w-full resize-y rounded-xl border border-white/10 bg-ink-900/80 px-4 py-3.5 text-[15px] leading-relaxed text-zinc-100 placeholder:text-zinc-600 outline-none transition-colors focus:border-accent-500/60 focus:bg-ink-900 disabled:opacity-50"
       />
@@ -106,7 +104,7 @@ export function Editor({
             id="tts-format"
             value={outputFormat}
             onChange={(e) => onOutputFormat(e.target.value)}
-            disabled={disabled || !meta}
+            disabled={!meta}
             className="h-[46px] rounded-xl border border-white/10 bg-ink-900/80 px-3 text-sm text-zinc-200 outline-none transition-colors focus:border-accent-500/60 disabled:opacity-50"
           >
             {meta

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { ElevenLabsClient, ElevenLabsError } from "@elevenlabs/elevenlabs-js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -45,6 +45,8 @@ const VOICE_SETTINGS = {
   similarityBoost: { min: 0, max: 1, step: 0.01, default: 0.75 },
   style: { min: 0, max: 1, step: 0.01, default: 0 },
   useSpeakerBoost: { default: true },
+  // `speed` only reaches ElevenLabs on models that support it (see MODELS).
+  speed: { min: 0.7, max: 1.2, step: 0.05, default: 1 },
 };
 
 if (!process.env.ELEVENLABS_API_KEY) {
@@ -67,7 +69,10 @@ function client() {
       throw err;
     }
     // Defaults to process.env.ELEVENLABS_API_KEY, like the getting-started snippet.
-    _client = new ElevenLabsClient();
+    // ELEVENLABS_BASE_URL is a test hook: it points the SDK at a local mock upstream.
+    _client = process.env.ELEVENLABS_BASE_URL
+      ? new ElevenLabsClient({ baseUrl: process.env.ELEVENLABS_BASE_URL })
+      : new ElevenLabsClient();
   }
   return _client;
 }
@@ -97,15 +102,25 @@ app.get("/api/meta", (_req, res) => {
   });
 });
 
+// Liveness probe for Docker: /api/meta always answers 200 (it is the config
+// endpoint the UI renders from), so it can't detect a missing API key.
+app.get("/api/health", (_req, res) => {
+  const apiKeyConfigured = Boolean(process.env.ELEVENLABS_API_KEY);
+  res.status(apiKeyConfigured ? 200 : 503).json({ ok: apiKeyConfigured, apiKeyConfigured });
+});
+
 // Account quota (character usage + tier), refreshed by the UI.
 app.get("/api/quota", async (_req, res) => {
   try {
     const sub = await client().user.subscription.get();
+    // The client destructures `{ quota, error }`, so the payload must be nested.
     res.json({
-      tier: sub.tier,
-      characterCount: sub.characterCount,
-      characterLimit: sub.characterLimit,
-      nextResetUnix: sub.nextCharacterCountResetUnix ?? null,
+      quota: {
+        tier: sub.tier,
+        characterCount: sub.characterCount,
+        characterLimit: sub.characterLimit,
+        nextResetUnix: sub.nextCharacterCountResetUnix ?? null,
+      },
     });
   } catch (err) {
     const { status, error, kind } = describeError(err);
@@ -116,7 +131,7 @@ app.get("/api/quota", async (_req, res) => {
 // Voices + preview URL for the in-app voice auditioning.
 app.get("/api/voices", async (_req, res) => {
   try {
-    const { voices } = await client().voices.search();
+    const voices = await fetchAllVoices();
     res.json({
       voices: voices.map((v) => ({
         id: v.voiceId,
@@ -133,6 +148,33 @@ app.get("/api/voices", async (_req, res) => {
     });
   }
 });
+
+/**
+ * The voices endpoint defaults to 10 voices per page, which silently truncated
+ * the list (the client search box only filters what we send). Ask for the
+ * maximum page size and follow `next_page_token` until `has_more` is false.
+ */
+async function fetchAllVoices() {
+  const PAGE_SIZE = 100; // API maximum
+  const MAX_PAGES = 20; // hard cap: a non-advancing token must not loop forever
+  const all = [];
+  let nextPageToken;
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    // `nextPageToken` is only sent once we actually have one — passing
+    // `undefined` through the SDK would be a type error.
+    const request = { pageSize: PAGE_SIZE };
+    if (nextPageToken !== undefined) request.nextPageToken = nextPageToken;
+
+    const pageData = await client().voices.search(request);
+    all.push(...(pageData.voices ?? []));
+    if (!pageData.hasMore) break;
+    nextPageToken = pageData.nextPageToken;
+    if (nextPageToken === undefined) break; // no token to continue with
+  }
+
+  return all;
+}
 
 app.post("/api/tts", async (req, res) => {
   const {
@@ -169,12 +211,17 @@ app.post("/api/tts", async (req, res) => {
     params.voiceSettings = settings;
   }
 
+  // Log what we actually send upstream (never the text itself) so the
+  // effective `speed`/voice settings are observable end-to-end.
+  console.log(
+    `[tts] model=${modelId} format=${outputFormat} chars=${text.length} voiceSettings=${JSON.stringify(settings ?? {})}`,
+  );
+
   try {
     const audio = await client().textToSpeech.convert(voiceId, params);
 
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "no-store");
-    res.setHeader("X-Generation-Params", JSON.stringify(params.modelId));
 
     // convert() yields a web ReadableStream (older versions: a Node Readable) —
     // bridge either one to the HTTP response.
@@ -212,7 +259,9 @@ function sanitizeVoiceSettings(candidate, modelId) {
     if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max) {
       return false;
     }
-    // ElevenLabs rejects `speed` on multilingual_v2.
+    // ElevenLabs rejects `speed` on multilingual_v2, so it is dropped there.
+    // Note: the range check above runs first, so an out-of-range `speed` is
+    // rejected with 400 even for models that would have dropped it anyway.
     if (key === "speed") {
       if (MODELS[modelId]?.supportsSpeed) out[key] = Number(value.toFixed(2));
     } else {
@@ -223,15 +272,33 @@ function sanitizeVoiceSettings(candidate, modelId) {
 }
 
 function describeError(err) {
-  const status = Number.isInteger(err?.statusCode) ? err.statusCode : 502;
+  const hasStatus = Number.isInteger(err?.statusCode);
+  const status = hasStatus ? err.statusCode : 502;
   const d = takeDetail(err);
-  const network = !Number.isInteger(err?.statusCode); // SDK got no HTTP response
+
+  // The SDK raises ElevenLabsError for HTTP responses (it carries the status
+  // code) and for transport failures (it doesn't). A ParseError means the
+  // response body didn't match the schema the SDK expects.
+  const httpError = err instanceof ElevenLabsError && hasStatus;
+  const schemaError = err?.name === "ParseError";
+  // No status code at all => the request never got an answer from ElevenLabs.
+  const network = !httpError && !hasStatus && !schemaError;
 
   // `${status} ${d.status} ${d.code} ${d.message}` in one lowercase haystack,
   // so classification doesn't depend on where ElevenLabs puts the hint
   // (401 "quota_exceeded", 402 "insufficient_credits", 429 …).
   const hay = `${status} ${d.status ?? ""} ${d.code ?? ""} ${d.type ?? ""} ${d.message ?? ""}`
     .toLowerCase();
+
+  // A schema failure is an upstream problem, not a connectivity one: the
+  // response arrived, it just didn't look like what the SDK expects.
+  if (schemaError) {
+    return {
+      status,
+      kind: "upstream",
+      error: `ElevenLabs returned an unexpected response format. (${d.text})`,
+    };
+  }
 
   // Quota errors arrive as 401/400 `quota_exceeded`, 402 `insufficient_credits`
   // or a 401 "exceeds your quota limit" message — never assume 4xx = bad key.

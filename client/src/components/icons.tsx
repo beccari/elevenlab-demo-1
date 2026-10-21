@@ -57,21 +57,6 @@ export function SparkIcon({ className }: IconProps) {
   );
 }
 
-export function SlidersIcon({ className }: IconProps) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path
-        d="M4 7h6m4 0h6M4 13h10m4 0h2"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="7" r="2" stroke="currentColor" strokeWidth="2" />
-      <circle cx="16" cy="13" r="2" stroke="currentColor" strokeWidth="2" />
-    </svg>
-  );
-}
-
 export function ChevronIcon({ className }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
